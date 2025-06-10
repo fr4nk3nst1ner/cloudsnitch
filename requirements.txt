@@ -12,4 +12,4 @@ azure-mgmt-network==23.1.0
 azure-mgmt-containerregistry==10.1.0
 azure-mgmt-containerservice==21.1.0
 azure-keyvault-secrets==4.6.0
-requests==2.32.2
+requests==2.32.4
