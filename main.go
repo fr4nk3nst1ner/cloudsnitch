@@ -48,7 +48,11 @@ AWS Examples:
   # Everything, as JSON on stdout:
   cloudsnitch -platform aws -profile PROFILE -aws-account 123456789012 -output-format json all | jq .
 
-Resource types: ami, ebs, s3, ec2, ecr, all`)
+  # IAM Access Analyzer findings (needs an analyzer in each region; an
+  # ORGANIZATION analyzer lets you pass any member account):
+  cloudsnitch -platform aws -profile PROFILE -aws-account 123456789012 access-analyzer
+
+Resource types: ami, ebs, s3, ec2, ecr, access-analyzer, all`)
 
 	case "gcp":
 		fmt.Println(`
@@ -60,7 +64,10 @@ GCP Examples:
   cloudsnitch -platform gcp -target-project PROJECT_ID -output-format json all
 
 Resource types: storage, compute, bigquery, iam, run, functions, artifacts,
-secrets, sql, firestore, pubsub, vpc, build, gke, all`)
+secrets, sql, firestore, pubsub, vpc, build, gke, assets, all
+
+  # Public IAM bindings across a whole org via Cloud Asset Inventory:
+  cloudsnitch -platform gcp -target-project QUOTA_PROJECT -gcp-scope organizations/123456789 assets`)
 
 	case "azure":
 		fmt.Println(`
@@ -104,9 +111,9 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s -platform <aws|gcp|azure> [options] [resource-type]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\nResource Types:\n")
-		fmt.Fprintf(os.Stderr, "  AWS:   ami, ebs, s3, ec2, ecr, all\n")
+		fmt.Fprintf(os.Stderr, "  AWS:   ami, ebs, s3, ec2, ecr, access-analyzer, all\n")
 		fmt.Fprintf(os.Stderr, "  GCP:   storage, compute, bigquery, iam, run, functions, artifacts,\n")
-		fmt.Fprintf(os.Stderr, "         secrets, sql, firestore, pubsub, vpc, build, gke, all\n")
+		fmt.Fprintf(os.Stderr, "         secrets, sql, firestore, pubsub, vpc, build, gke, assets, all\n")
 		fmt.Fprintf(os.Stderr, "  Azure: all (preview)\n")
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
@@ -124,6 +131,7 @@ func main() {
 
 	gcpProject := flag.String("target-project", getEnvOrDefault("GCP_PROJECT_ID", ""), "GCP project ID to enumerate")
 	flag.StringVar(gcpProject, "gcp-project-id", *gcpProject, "Alias for -target-project")
+	gcpScope := flag.String("gcp-scope", getEnvOrDefault("GCP_SCOPE", ""), "Cloud Asset Inventory scope for the 'assets' check: projects/ID, folders/ID, or organizations/ID (default: the target project)")
 
 	account := flag.String("account", "", "Shorthand: AWS account ID or GCP project ID depending on -platform")
 	azureSubscriptionID := flag.String("subscription-id", getEnvOrDefault("AZURE_SUBSCRIPTION_ID", ""), "Azure subscription ID")
@@ -226,6 +234,11 @@ func main() {
 		}
 		config.SourceProject = project
 		config.TargetProject = project
+		config.GCPScope = *gcpScope
+		if config.GCPScope != "" && !strings.HasPrefix(config.GCPScope, "projects/") &&
+			!strings.HasPrefix(config.GCPScope, "folders/") && !strings.HasPrefix(config.GCPScope, "organizations/") {
+			fatalf("-gcp-scope must start with projects/, folders/, or organizations/")
+		}
 
 		enumerator, err := gcp.NewEnumerator(config)
 		if err != nil {

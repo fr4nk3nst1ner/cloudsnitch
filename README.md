@@ -88,6 +88,9 @@ go run . -platform aws -profile myprofile -accounts-file accounts.txt ebs
 
 # List all public resources in an account
 go run . -platform aws -profile myprofile -aws-account 123456789012 all
+
+# IAM Access Analyzer findings for an account
+go run . -platform aws -profile myprofile -aws-account 123456789012 access-analyzer
 ```
 
 Supported AWS resource types:
@@ -96,6 +99,7 @@ Supported AWS resource types:
 - `s3`: Buckets public via bucket policy or ACL, after bucket-level Block Public Access (caller's account)
 - `ec2`: Instances with a public IP, plus security group rules open to 0.0.0.0/0 or ::/0 (caller's account)
 - `ecr`: Repositories with a repository policy attached, for review (caller's account)
+- `access-analyzer`: Active external-access findings from IAM Access Analyzer, covering S3, IAM roles, KMS, Lambda, SQS, Secrets Manager, EBS/RDS snapshots, ECR, EFS, DynamoDB and more. Needs an `ACCOUNT` or `ORGANIZATION` analyzer in each region you want covered; an `ORGANIZATION` analyzer (in the management or delegated admin account) lets you scan any member account by passing it to `-aws-account`
 - `all`: All resource types
 
 `-aws-account` (or `-accounts-file`) is required. The `s3`, `ec2`, and `ecr` checks inspect the account your profile is authenticated to.
@@ -105,6 +109,7 @@ Supported AWS resource types:
 GCP-specific flags:
 ```
 -target-project   Target GCP project ID
+-gcp-scope        Scope for the assets check: projects/ID, folders/ID, or organizations/ID
 ```
 
 Example commands:
@@ -120,6 +125,9 @@ go run . -platform gcp -target-project TARGET_PROJECT_ID bigquery
 
 # Enumerate all public resources
 go run . -platform gcp -target-project TARGET_PROJECT_ID all
+
+# Public IAM bindings across an entire organization
+go run . -platform gcp -target-project QUOTA_PROJECT_ID -gcp-scope organizations/123456789 assets
 ```
 
 Supported GCP resource types:
@@ -137,6 +145,7 @@ Supported GCP resource types:
 - `vpc`: VPC firewall rules
 - `build`: Cloud Build artifacts
 - `gke`: GKE clusters
+- `assets`: Every IAM policy that grants a role to `allUsers` or `allAuthenticatedUsers`, found with one Cloud Asset Inventory search. Covers all resource types that support IAM policies. Use `-gcp-scope folders/ID` or `-gcp-scope organizations/ID` to search a whole folder or org. Needs the Cloud Asset API enabled on the target project and `roles/cloudasset.viewer` on the scope
 - `all`: All resource types
 
 ### Azure Usage (Coming Soon)
