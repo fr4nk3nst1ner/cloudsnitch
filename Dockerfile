@@ -1,5 +1,5 @@
 # Use the official Go image as a builder
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Set the working directory
 WORKDIR /app
@@ -13,8 +13,8 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
-# Build the application using cloudSnitch.go as the entry point
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/cloudsnitch ./cloudSnitch.go
+# Build the application from the main package
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/cloudsnitch .
 
 # Use a minimal alpine image for the final container
 FROM alpine:latest

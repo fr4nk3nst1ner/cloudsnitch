@@ -3,15 +3,15 @@ package main
 import (
 	"bufio"
 	"flag"
-	"log"
-	"os"
-	"strings"
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 
 	"enumcloud/pkg/cloud"
 	"enumcloud/pkg/cloud/aws"
-	"enumcloud/pkg/cloud/gcp"
 	"enumcloud/pkg/cloud/azure"
+	"enumcloud/pkg/cloud/gcp"
 )
 
 // getEnvOrDefault returns environment variable value or default if not set
@@ -22,252 +22,245 @@ func getEnvOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
+// fatalf prints an error to stderr and exits. Errors go to stderr so that
+// stdout stays clean for JSON/CSV output.
+func fatalf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
+	os.Exit(1)
+}
+
 func showExamples(platform string) {
 	switch strings.ToLower(platform) {
 	case "aws":
-		fmt.Println("\nAWS Examples (using environment variables):")
-		fmt.Println("# Required environment variables:")
-		fmt.Println("  export AWS_PROFILE=your-aws-profile")
-		fmt.Println("  export AWS_ACCOUNT_ID=your-aws-account-id")
-		fmt.Println("  export AWS_ACCOUNTS_FILE=path/to/accounts-file  # Optional, for multiple accounts")
-		fmt.Println("\n# Current Account Examples (using your profile's account):")
-		fmt.Println("  # List public AMIs in your account:")
-		fmt.Println("  go run cloudSnitch.go -platform aws ami")
-		fmt.Println("\n  # List public EBS snapshots in your account:")
-		fmt.Println("  go run cloudSnitch.go -platform aws ebs")
-		fmt.Println("\n  # List public ECR repositories in your account:")
-		fmt.Println("  go run cloudSnitch.go -platform aws ecr")
-		fmt.Println("\n# Target Other Account Examples:")
-		fmt.Println("  # List public AMIs from specific account:")
-		fmt.Println("  go run cloudSnitch.go -platform aws ami --aws-account $AWS_ACCOUNT_ID")
-		fmt.Println("\n  # List public EBS snapshots from multiple accounts:")
-		fmt.Println("  go run cloudSnitch.go -platform aws ebs --accounts-file $AWS_ACCOUNTS_FILE")
+		fmt.Println(`
+AWS Examples:
+  # Public AMIs / EBS snapshots owned by an account (works cross-account):
+  cloudsnitch -platform aws -profile PROFILE -aws-account 123456789012 ami
+  cloudsnitch -platform aws -profile PROFILE -aws-account 123456789012 ebs
+
+  # Same checks across many accounts:
+  cloudsnitch -platform aws -profile PROFILE -accounts-file accounts.txt ebs
+
+  # Public S3 buckets, internet-exposed EC2, public/cross-account ECR
+  # (these inspect the account your profile is authenticated to):
+  cloudsnitch -platform aws -profile PROFILE -aws-account 123456789012 s3
+
+  # Everything, as JSON on stdout:
+  cloudsnitch -platform aws -profile PROFILE -aws-account 123456789012 -output-format json all | jq .
+
+Resource types: ami, ebs, s3, ec2, ecr, all`)
 
 	case "gcp":
-		fmt.Println("\nGCP Examples:")
-		fmt.Println("# Required environment variables:")
-		fmt.Println("  export GCP_PROJECT_ID=your-gcp-project-id")
-		fmt.Println("  export GCP_ACCOUNT=your-gcp-account@domain.com")
-		fmt.Println("\n# Current Project Examples (using your authenticated account):")
-		fmt.Println("  # List all resources in current project:")
-		fmt.Println("  go run cloudSnitch.go -platform gcp all")
-		fmt.Println("\n  # List only Compute Engine instances:")
-		fmt.Println("  go run cloudSnitch.go -platform gcp compute")
-		fmt.Println("\n# Target Other Project/Account Examples:")
-		fmt.Println("  # List resources using specific account:")
-		fmt.Println("  go run cloudSnitch.go -platform gcp all -account $GCP_ACCOUNT")
-		fmt.Println("\n  # List resources in specific project with specific account:")
-		fmt.Println("  go run cloudSnitch.go -platform gcp all -gcp-project-id $GCP_PROJECT_ID -account $GCP_ACCOUNT")
+		fmt.Println(`
+GCP Examples:
+  # Uses Application Default Credentials (gcloud auth application-default login).
+  # If no project is given, the active gcloud project is used.
+  cloudsnitch -platform gcp -target-project PROJECT_ID storage
+  cloudsnitch -platform gcp -target-project PROJECT_ID compute
+  cloudsnitch -platform gcp -target-project PROJECT_ID -output-format json all
+
+Resource types: storage, compute, bigquery, iam, run, functions, artifacts,
+secrets, sql, firestore, pubsub, vpc, build, gke, all`)
 
 	case "azure":
-		fmt.Println("\nAzure Examples:")
-		fmt.Println("# Required environment variables:")
-		fmt.Println("  export AZURE_SUBSCRIPTION_ID=your-subscription-id")
-		fmt.Println("\n# Current Subscription Examples (using your authenticated subscription):")
-		fmt.Println("  # List all resources in current subscription:")
-		fmt.Println("  go run cloudSnitch.go -platform azure all")
-		fmt.Println("\n# Target Other Subscription Examples:")
-		fmt.Println("  # List resources in specific subscription:")
-		fmt.Println("  go run cloudSnitch.go -platform azure all --subscription-id $AZURE_SUBSCRIPTION_ID")
+		fmt.Println(`
+Azure Examples (preview):
+  cloudsnitch -platform azure -subscription-id SUB_ID all`)
 
 	default:
-		fmt.Println("Please specify a valid platform (aws, gcp, or azure) with -platform flag")
+		fmt.Println("Please specify a valid platform (aws, gcp, or azure) with -platform")
 	}
 }
 
-func Main() {
-	// Define command-line flags
+// currentGcloudProject returns the active gcloud project, or "" if gcloud is
+// unavailable or has no project set.
+func currentGcloudProject() string {
+	out, err := exec.Command("gcloud", "config", "get-value", "project").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func readAccountsFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var accounts []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			accounts = append(accounts, line)
+		}
+	}
+	return accounts, scanner.Err()
+}
+
+func main() {
 	flag.Usage = func() {
-		log.Printf("Usage: %s -platform <aws|gcp|azure> [resource-type] [options]\n", os.Args[0])
-		log.Printf("\nResource Types:\n")
-		log.Printf("  AWS: ami, ebs, s3, ec2, ecr\n")
-		log.Printf("  GCP: compute, storage, gke, artifacts\n")
-		log.Printf("  Azure: vm, storage, acr, aks\n")
-		log.Printf("\nOptions:\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s -platform <aws|gcp|azure> [options] [resource-type]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nResource Types:\n")
+		fmt.Fprintf(os.Stderr, "  AWS:   ami, ebs, s3, ec2, ecr, all\n")
+		fmt.Fprintf(os.Stderr, "  GCP:   storage, compute, bigquery, iam, run, functions, artifacts,\n")
+		fmt.Fprintf(os.Stderr, "         secrets, sql, firestore, pubsub, vpc, build, gke, all\n")
+		fmt.Fprintf(os.Stderr, "  Azure: all (preview)\n")
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
-		log.Printf("\nEnvironment Variables:\n")
-		log.Printf("  AWS_PROFILE           AWS CLI profile name\n")
-		log.Printf("  AWS_ACCOUNT_ID        AWS account ID\n")
-		log.Printf("  GCP_PROJECT_ID        GCP project ID\n")
-		log.Printf("  GCP_ACCOUNT           GCP account email\n")
-		log.Printf("  AZURE_SUBSCRIPTION_ID Azure subscription ID\n")
+		fmt.Fprintf(os.Stderr, "\nEnvironment Variables:\n")
+		fmt.Fprintf(os.Stderr, "  AWS_PROFILE, AWS_ACCOUNT_ID, AWS_ACCOUNTS_FILE\n")
+		fmt.Fprintf(os.Stderr, "  GCP_PROJECT_ID, AZURE_SUBSCRIPTION_ID\n")
 	}
 
-	// Define flags
 	platform := flag.String("platform", "", "Cloud platform to enumerate (aws, gcp, azure)")
 	examples := flag.Bool("examples", false, "Show example commands for the specified platform")
-	profile := flag.String("profile", "", "AWS CLI profile name")
-	accountsFile := flag.String("accounts-file", getEnvOrDefault("AWS_ACCOUNTS_FILE", ""), "Path to file containing AWS account IDs")
+
+	profile := flag.String("profile", getEnvOrDefault("AWS_PROFILE", ""), "AWS CLI profile name")
+	accountsFile := flag.String("accounts-file", getEnvOrDefault("AWS_ACCOUNTS_FILE", ""), "Path to file containing AWS account IDs, one per line")
 	awsAccount := flag.String("aws-account", getEnvOrDefault("AWS_ACCOUNT_ID", ""), "AWS account ID")
-	gcpProjectID := flag.String("gcp-project-id", getEnvOrDefault("GCP_PROJECT_ID", ""), "GCP Project ID")
-	account := flag.String("account", "", "Account email (for GCP) or account ID (for AWS)")
-	azureSubscriptionID := flag.String("subscription-id", getEnvOrDefault("AZURE_SUBSCRIPTION_ID", ""), "Azure Subscription ID")
-	logLevel := flag.String("log-level", "INFO", "Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
-	logFile := flag.String("log-file", "", "Log file path")
+
+	gcpProject := flag.String("target-project", getEnvOrDefault("GCP_PROJECT_ID", ""), "GCP project ID to enumerate")
+	flag.StringVar(gcpProject, "gcp-project-id", *gcpProject, "Alias for -target-project")
+
+	account := flag.String("account", "", "Shorthand: AWS account ID or GCP project ID depending on -platform")
+	azureSubscriptionID := flag.String("subscription-id", getEnvOrDefault("AZURE_SUBSCRIPTION_ID", ""), "Azure subscription ID")
+	flag.StringVar(azureSubscriptionID, "subscription", *azureSubscriptionID, "Alias for -subscription-id")
+
+	logLevel := flag.String("log-level", "INFO", "Logging level (DEBUG, INFO, WARNING, ERROR)")
+	logFile := flag.String("log-file", "", "Also write logs to this file")
 	outputFormat := flag.String("output-format", "text", "Output format (text, json, csv)")
-	outputFile := flag.String("output-file", "", "Output file path")
+	outputFile := flag.String("output-file", "", "Write results to this file instead of stdout")
 
 	flag.Parse()
 
-	if *platform == "" {
-		log.Fatal("Platform is required. Use -platform flag with aws, gcp, or azure")
-	}
-
-	// If examples flag is set, show examples and exit
 	if *examples {
 		showExamples(*platform)
 		return
 	}
 
-	// Initialize logger early
-	logConfig := cloud.LogConfig{
-		Level:    *logLevel,
-		FilePath: *logFile,
-	}
-	if err := cloud.InitLogger(logConfig); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+	plat := strings.ToLower(*platform)
+	if plat == "" {
+		flag.Usage()
+		os.Exit(2)
 	}
 
-	// Get resource type from positional arguments
+	switch *outputFormat {
+	case "text", "json", "csv":
+	default:
+		fatalf("unsupported output format %q (use text, json, or csv)", *outputFormat)
+	}
+
+	if err := cloud.InitLogger(cloud.LogConfig{Level: *logLevel, FilePath: *logFile}); err != nil {
+		fatalf("failed to initialize logger: %v", err)
+	}
+
 	resourceType := "all"
 	if flag.NArg() > 0 {
-		resourceType = flag.Arg(0)
+		resourceType = strings.ToLower(flag.Arg(0))
 	}
 
-	// Process command line flags and environment variables
-	// Command line flags take precedence over environment variables
 	if *account != "" {
-		switch strings.ToLower(*platform) {
+		switch plat {
 		case "aws":
 			*awsAccount = *account
 		case "gcp":
-			*gcpProjectID = *account
+			*gcpProject = *account
 		}
 	}
 
-	// Handle AWS profile - command line flag takes precedence
-	if *profile != "" {
-		// Use profile directly from command line flag
-		cloud.InfoLogger.Printf("Using AWS profile from command line: %s", *profile)
-	} else if envProfile := os.Getenv("AWS_PROFILE"); envProfile != "" {
-		// Fall back to environment variable
-		*profile = envProfile
-		cloud.InfoLogger.Printf("Using AWS profile from environment: %s", *profile)
-	}
-
-	// Validate required configuration based on platform
-	switch strings.ToLower(*platform) {
-	case "aws":
-		if *profile == "" {
-			log.Fatal("AWS profile is required. Set AWS_PROFILE environment variable or use -profile flag")
-		}
-		if *awsAccount == "" {
-			log.Fatal("AWS account ID is required. Set AWS_ACCOUNT_ID environment variable or use -aws-account flag")
-		}
-	case "gcp":
-		if *gcpProjectID == "" && os.Getenv("GCP_PROJECT_ID") == "" {
-			log.Fatal("GCP project ID is required. Set GCP_PROJECT_ID environment variable or use -gcp-project-id flag")
-		}
-	case "azure":
-		if *azureSubscriptionID == "" && os.Getenv("AZURE_SUBSCRIPTION_ID") == "" {
-			log.Fatal("Azure subscription ID is required. Set AZURE_SUBSCRIPTION_ID environment variable or use -subscription-id flag")
-		}
-	}
-
-	// Handle AWS accounts
-	var awsAccounts []string
-	if *accountsFile != "" {
-		file, err := os.Open(*accountsFile)
-		if err != nil {
-			log.Fatalf("Failed to open accounts file: %v", err)
-		}
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			account := strings.TrimSpace(scanner.Text())
-			if account != "" {
-				awsAccounts = append(awsAccounts, account)
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			log.Fatalf("Failed to read accounts file: %v", err)
-		}
-	} else if *account != "" && *platform == "aws" {
-		awsAccounts = []string{*account}
-	} else {
-		awsAccounts = []string{*awsAccount}
-	}
-
-	// Process each account
-	var allResults []*cloud.Results
-	
-	// Create base config
 	config := cloud.Config{
-		Platform:        *platform,
-		Profile:         *profile,
-		SourceProject:   *gcpProjectID,
-		TargetProject:   *gcpProjectID,  // Initially set to same as source
-		SubscriptionID:  *azureSubscriptionID,
-		OutputFormat:    *outputFormat,
-		OutputFile:      *outputFile,
-		ResourceTypes:   []string{resourceType},
+		Platform:       plat,
+		Profile:        *profile,
+		SubscriptionID: *azureSubscriptionID,
+		OutputFormat:   *outputFormat,
+		OutputFile:     *outputFile,
+		ResourceTypes:  []string{resourceType},
 	}
 
-	switch strings.ToLower(*platform) {
+	var allResults []*cloud.Results
+
+	switch plat {
 	case "aws":
-		// Process each AWS account
-		for _, account := range awsAccounts {
-			config.AWSAccount = account
+		var accounts []string
+		if *accountsFile != "" {
+			var err error
+			accounts, err = readAccountsFile(*accountsFile)
+			if err != nil {
+				fatalf("failed to read accounts file: %v", err)
+			}
+		} else if *awsAccount != "" {
+			accounts = []string{*awsAccount}
+		}
+		if len(accounts) == 0 {
+			fatalf("AWS account ID is required. Use -aws-account, -accounts-file, or set AWS_ACCOUNT_ID")
+		}
+		if config.Profile != "" {
+			cloud.InfoLogger.Printf("Using AWS profile: %s", config.Profile)
+		}
+
+		for _, acct := range accounts {
+			config.AWSAccount = acct
 			enumerator, err := aws.NewEnumerator(config)
 			if err != nil {
-				log.Fatalf("Failed to create AWS enumerator: %v", err)
+				fatalf("failed to create AWS enumerator: %v", err)
 			}
 			results, err := enumerator.Enumerate()
 			if err != nil {
-				log.Fatalf("AWS enumeration failed: %v", err)
+				// One bad account shouldn't kill a multi-account run.
+				cloud.ErrorLogger.Printf("AWS enumeration failed for account %s: %v", acct, err)
+				continue
 			}
 			allResults = append(allResults, results)
 		}
+
 	case "gcp":
+		project := *gcpProject
+		if project == "" {
+			project = currentGcloudProject()
+		}
+		if project == "" {
+			fatalf("GCP project ID is required. Use -target-project, set GCP_PROJECT_ID, or set a gcloud default project")
+		}
+		config.SourceProject = project
+		config.TargetProject = project
+
 		enumerator, err := gcp.NewEnumerator(config)
 		if err != nil {
-			log.Fatalf("Failed to create GCP enumerator: %v", err)
+			fatalf("failed to create GCP enumerator: %v", err)
 		}
 		results, err := enumerator.Enumerate()
 		if err != nil {
-			log.Fatalf("GCP enumeration failed: %v", err)
+			fatalf("GCP enumeration failed: %v", err)
 		}
 		allResults = append(allResults, results)
+
 	case "azure":
+		if config.SubscriptionID == "" {
+			fatalf("Azure subscription ID is required. Use -subscription-id or set AZURE_SUBSCRIPTION_ID")
+		}
 		enumerator, err := azure.NewEnumerator(config)
 		if err != nil {
-			log.Fatalf("Failed to create Azure enumerator: %v", err)
+			fatalf("failed to create Azure enumerator: %v", err)
 		}
 		results, err := enumerator.Enumerate()
 		if err != nil {
-			log.Fatalf("Azure enumeration failed: %v", err)
+			fatalf("Azure enumeration failed: %v", err)
 		}
 		allResults = append(allResults, results)
+
 	default:
-		log.Fatalf("Unsupported platform: %s", *platform)
+		fatalf("unsupported platform: %s", *platform)
 	}
 
-	// Combine all results
-	combinedResults := &cloud.Results{
-		Platform:  allResults[0].Platform,
-		Resources: make([]cloud.Resource, 0),
-	}
-	for _, result := range allResults {
-		combinedResults.Resources = append(combinedResults.Resources, result.Resources...)
+	combined := &cloud.Results{Platform: plat, Resources: make([]cloud.Resource, 0)}
+	for _, r := range allResults {
+		combined.Resources = append(combined.Resources, r.Resources...)
 	}
 
-	// Write combined results
-	if err := cloud.WriteOutput(combinedResults, cloud.Config{
-		OutputFormat: *outputFormat,
-		OutputFile:  *outputFile,
-	}); err != nil {
-		log.Fatalf("Failed to write output: %v", err)
+	if err := cloud.WriteOutput(combined, config); err != nil {
+		fatalf("failed to write output: %v", err)
 	}
-} 
+}

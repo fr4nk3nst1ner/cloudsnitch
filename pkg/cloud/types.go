@@ -56,21 +56,14 @@ func WriteOutput(results *Results, config Config) error {
 		return fmt.Errorf("no results to write")
 	}
 
-	var err error
-	if config.OutputFile != "" {
-		switch config.OutputFormat {
-		case "json":
-			err = writeJSON(results, config.OutputFile)
-		case "csv":
-			err = writeCSV(results, config.OutputFile)
-		default:
-			err = writeText(results, config.OutputFile)
-		}
-	} else {
-		err = writeText(results, "")
+	switch config.OutputFormat {
+	case "json":
+		return writeJSON(results, config.OutputFile)
+	case "csv":
+		return writeCSV(results, config.OutputFile)
+	default:
+		return writeText(results, config.OutputFile)
 	}
-
-	return err
 }
 
 func writeJSON(results *Results, filepath string) error {
