@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"os/exec"
 
 	"enumcloud/pkg/cloud"
 
@@ -50,23 +49,6 @@ func NewEnumerator(config cloud.Config) (cloud.Enumerator, error) {
 		config: config,
 		ctx:    context.Background(),
 	}, nil
-}
-
-// switchAccount switches the active gcloud account and project
-func switchAccount(account, project string) error {
-	// Switch account
-	cmd := exec.Command("gcloud", "config", "set", "account", account)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to switch account: %v", err)
-	}
-
-	// Switch project
-	cmd = exec.Command("gcloud", "config", "set", "project", project)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to switch project: %v", err)
-	}
-
-	return nil
 }
 
 // Helper function to check if error is due to API being disabled
@@ -430,7 +412,7 @@ func (e *Enumerator) enumerateComputeSnapshots(results *cloud.Results, opts []op
 		isPublic := false
 		for _, binding := range iam.Bindings {
 			for _, member := range binding.Members {
-				if member == "allUsers" || member == "allAuthenticatedUsers" || strings.HasPrefix(member, "user:") || strings.HasPrefix(member, "serviceAccount:") {
+				if isPublicOrCrossAccount(member, e.config.SourceProject) {
 					isPublic = true
 					break
 				}
@@ -447,7 +429,7 @@ func (e *Enumerator) enumerateComputeSnapshots(results *cloud.Results, opts []op
 			Type:      "compute-snapshot",
 			Name:      snapshot.Name,
 			ID:        fmt.Sprintf("%d", snapshot.Id),
-			Location:  snapshot.StorageLocations[0],
+			Location:  firstOr(snapshot.StorageLocations, "global"),
 			CreatedAt: createdAt,
 			Properties: map[string]interface{}{
 				"disk_size_gb":    snapshot.DiskSizeGb,
@@ -487,7 +469,7 @@ func (e *Enumerator) enumerateComputeImages(results *cloud.Results, opts []optio
 		isPublic := false
 		for _, binding := range iam.Bindings {
 			for _, member := range binding.Members {
-				if member == "allUsers" || member == "allAuthenticatedUsers" || strings.HasPrefix(member, "user:") || strings.HasPrefix(member, "serviceAccount:") {
+				if isPublicOrCrossAccount(member, e.config.SourceProject) {
 					isPublic = true
 					break
 				}
@@ -1121,20 +1103,36 @@ func (e *Enumerator) enumerateGKEClusters(results *cloud.Results, opts []option.
 
 // Helper function to check if a member is public or cross-account
 func isPublicOrCrossAccount(member string, projectID string) bool {
-	// Check for public access
+	// Public access
 	if member == "allUsers" || member == "allAuthenticatedUsers" {
 		return true
 	}
 
-	// Check for cross-account access (different project)
-	if strings.Contains(member, "serviceAccount:") && !strings.Contains(member, projectID) {
-		return true
+	// Cross-project service accounts. User-managed service accounts look like
+	// NAME@PROJECT_ID.iam.gserviceaccount.com. Google-managed service agents
+	// (gcp-sa-*, cloudservices, developer, cloudbuild, etc.) are expected
+	// bindings, not cross-project exposure.
+	if email, ok := strings.CutPrefix(member, "serviceAccount:"); ok {
+		at := strings.LastIndex(email, "@")
+		if at < 0 {
+			return false
+		}
+		domain := email[at+1:]
+		project, ok := strings.CutSuffix(domain, ".iam.gserviceaccount.com")
+		if !ok || strings.HasPrefix(project, "gcp-sa-") {
+			return false
+		}
+		return project != projectID
 	}
 
-	// Check for external user accounts
-	if strings.HasPrefix(member, "user:") && !strings.Contains(member, projectID) {
-		return true
-	}
-
+	// user:, group:, and domain: members can't be classified as internal or
+	// external from the project ID alone, so they are not flagged here.
 	return false
-} 
+}
+
+func firstOr(values []string, fallback string) string {
+	if len(values) > 0 {
+		return values[0]
+	}
+	return fallback
+}

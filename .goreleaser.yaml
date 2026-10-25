@@ -2,7 +2,7 @@ project_name: cloudsnitch
 
 builds:
   - id: cloudsnitch
-    main: ./cloudSnitch.go
+    main: .
     binary: cloudsnitch
     goos:
       - linux

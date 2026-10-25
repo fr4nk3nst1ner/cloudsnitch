@@ -23,7 +23,7 @@ A tool for enumerating publicly accessible or cross-account shared cloud resourc
 
 ## Prerequisites
 
-- Go 1.19 or later
+- Go 1.24 or later
 - For AWS:
   - AWS CLI configured with credentials
   - AWS profile with necessary permissions
@@ -48,8 +48,10 @@ go build
 
 Basic syntax:
 ```bash
-go run cloudsnitch.go -platform PLATFORM [flags] RESOURCE_TYPE
+go run . -platform PLATFORM [flags] RESOURCE_TYPE
 ```
+
+Logs are written to stderr and results to stdout, so JSON and CSV output can be piped (for example, `-output-format json | jq`).
 
 Common flags:
 ```
@@ -61,7 +63,7 @@ Common flags:
 
 To see example usage and supported resource types:
 ```bash
-go run cloudsnitch.go -examples
+go run . -examples
 ```
 
 ### AWS Usage
@@ -75,26 +77,28 @@ AWS-specific flags:
 
 Example commands:
 ```bash
-# List public AMIs in your account
-go run cloudsnitch.go -platform aws -profile myprofile ami
+# List public AMIs owned by an account
+go run . -platform aws -profile myprofile -aws-account 123456789012 ami
 
 # List public EBS snapshots in specific account
-go run cloudsnitch.go -platform aws -profile myprofile -aws-account 123456789012 ebs
+go run . -platform aws -profile myprofile -aws-account 123456789012 ebs
 
-# List public ECR repositories from multiple accounts
-go run cloudsnitch.go -platform aws -profile myprofile -accounts-file accounts.txt ecr
+# List public EBS snapshots across multiple accounts
+go run . -platform aws -profile myprofile -accounts-file accounts.txt ebs
 
 # List all public resources in an account
-go run cloudsnitch.go -platform aws -profile myprofile -aws-account 123456789012 all
+go run . -platform aws -profile myprofile -aws-account 123456789012 all
 ```
 
 Supported AWS resource types:
-- `ami`: Amazon Machine Images
-- `ebs`: EBS snapshots
-- `ecr`: Elastic Container Registry repositories
-- `s3`: S3 buckets
-- `ec2`: EC2 instances
+- `ami`: AMIs owned by the target account that are public (works cross-account)
+- `ebs`: EBS snapshots owned by the target account that are restorable by everyone (works cross-account)
+- `s3`: Buckets public via bucket policy or ACL, after bucket-level Block Public Access (caller's account)
+- `ec2`: Instances with a public IP, plus security group rules open to 0.0.0.0/0 or ::/0 (caller's account)
+- `ecr`: Repositories with a repository policy attached, for review (caller's account)
 - `all`: All resource types
+
+`-aws-account` (or `-accounts-file`) is required. The `s3`, `ec2`, and `ecr` checks inspect the account your profile is authenticated to.
 
 ### GCP Usage
 
@@ -106,16 +110,16 @@ GCP-specific flags:
 Example commands:
 ```bash
 # Enumerate public storage buckets
-go run cloudsnitch.go -platform gcp -target-project TARGET_PROJECT_ID storage
+go run . -platform gcp -target-project TARGET_PROJECT_ID storage
 
 # Enumerate public compute resources
-go run cloudsnitch.go -platform gcp -target-project TARGET_PROJECT_ID compute
+go run . -platform gcp -target-project TARGET_PROJECT_ID compute
 
 # Enumerate public BigQuery datasets
-go run cloudsnitch.go -platform gcp -target-project TARGET_PROJECT_ID bigquery
+go run . -platform gcp -target-project TARGET_PROJECT_ID bigquery
 
 # Enumerate all public resources
-go run cloudsnitch.go -platform gcp -target-project TARGET_PROJECT_ID all
+go run . -platform gcp -target-project TARGET_PROJECT_ID all
 ```
 
 Supported GCP resource types:
@@ -145,13 +149,13 @@ Azure-specific flags:
 Example commands (preview):
 ```bash
 # List public storage accounts
-go run cloudsnitch.go -platform azure -subscription SUB_ID storage
+go run . -platform azure -subscription SUB_ID storage
 
 # List public VMs
-go run cloudsnitch.go -platform azure -subscription SUB_ID vm
+go run . -platform azure -subscription SUB_ID vm
 
 # List all public resources
-go run cloudsnitch.go -platform azure -subscription SUB_ID all
+go run . -platform azure -subscription SUB_ID all
 ```
 
 Planned Azure resource types:

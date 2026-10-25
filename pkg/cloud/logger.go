@@ -18,7 +18,8 @@ var (
 // InitLogger initializes the logging system
 func InitLogger(config LogConfig) error {
 	var writers []io.Writer
-	writers = append(writers, os.Stdout)
+	// Logs go to stderr so stdout carries only results (pipeable JSON/CSV).
+	writers = append(writers, os.Stderr)
 
 	if config.FilePath != "" {
 		file, err := os.OpenFile(config.FilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
