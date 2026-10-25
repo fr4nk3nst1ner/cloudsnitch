@@ -26,6 +26,7 @@ type Config struct {
 	ResourceTypes   []string
 	SourceProject   string   // Source GCP project ID
 	TargetProject   string   // Target GCP project ID
+	GCPScope        string   // Cloud Asset Inventory scope: projects/ID, folders/ID, or organizations/ID
 }
 
 // Resource represents a generic cloud resource

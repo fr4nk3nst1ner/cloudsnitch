@@ -66,8 +66,11 @@ func (e *Enumerator) Enumerate() (*cloud.Results, error) {
 		"s3":  func(_ []string, r *cloud.Results) error { return e.enumerateS3(r) },
 		"ec2": e.enumerateEC2,
 		"ecr": e.enumerateECR,
+		// Broad policy-based coverage from IAM Access Analyzer. Overlaps
+		// with s3/ecr/ebs findings above but covers many more resource types.
+		"access-analyzer": e.enumerateAccessAnalyzer,
 	}
-	order := []string{"ami", "ebs", "s3", "ec2", "ecr"}
+	order := []string{"ami", "ebs", "s3", "ec2", "ecr", "access-analyzer"}
 
 	for _, resourceType := range e.config.ResourceTypes {
 		var run []string

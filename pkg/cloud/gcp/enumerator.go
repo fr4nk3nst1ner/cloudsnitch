@@ -177,6 +177,10 @@ func (e *Enumerator) Enumerate() (*cloud.Results, error) {
 			handleEnumerationError(err, "GKE Clusters")
 		}
 
+		if err := e.enumerateAssetInventory(results, sourceOpts); err != nil {
+			handleEnumerationError(err, "Cloud Asset Inventory")
+		}
+
 		// Log summary of skipped resources
 		if len(skippedAPIs) > 0 {
 			cloud.InfoLogger.Println("\nSkipped APIs (not enabled):")
@@ -255,6 +259,10 @@ func (e *Enumerator) Enumerate() (*cloud.Results, error) {
 	case "gke":
 		if err := e.enumerateGKEClusters(results, sourceOpts); err != nil {
 			handleEnumerationError(err, "GKE Clusters")
+		}
+	case "assets":
+		if err := e.enumerateAssetInventory(results, sourceOpts); err != nil {
+			handleEnumerationError(err, "Cloud Asset Inventory")
 		}
 	default:
 		return nil, fmt.Errorf("unsupported resource type: %s", resourceType)
