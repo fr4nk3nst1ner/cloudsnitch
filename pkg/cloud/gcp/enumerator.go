@@ -1046,7 +1046,7 @@ func (e *Enumerator) enumerateCloudBuild(results *cloud.Results, opts []option.C
 		resource := cloud.Resource{
 			Type:      "cloud-build-build",
 			Name:      build.Name,
-			ID:        fmt.Sprintf("%d", build.Id),
+			ID:        build.Id,
 			CreatedAt: createdAt,
 			Properties: map[string]interface{}{
 				"status": build.Status,
